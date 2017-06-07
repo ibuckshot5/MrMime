@@ -15,7 +15,7 @@ from mrmime import player_locale, pogo_account_config, APP_VERSION, avatar
 log = logging.getLogger(__name__)
 
 
-class POGOAccount:
+class POGOAccount(object):
 
     def __init__(self, auth_service, username, password, proxy_url=None, hash_key=None):
         self.auth_service = auth_service
