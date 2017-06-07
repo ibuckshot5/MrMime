@@ -1,0 +1,48 @@
+This is the minimum required login request flow according to Chrales on
+Discord:
+===========================================================================
+
+1. empty request
++++ signature
+
+2. GET_PLAYER(player_locale(country="US", language="en", timezone="Europe/Paris"))
++++ signature
+
+3. DOWNLOAD_REMOTE_CONFIG_VERSION(platform=1, app_version=6301)
++ CHECK_CHALLENGE
++ GET_HATCHED_EGGS
++ GET_INVENTORY(last_timestamp_ms="0")
++ CHECK_AWARDED_BADGES
++ DOWNLOAD_SETTINGS
++++ signature
+
+4. GET_PLAYER_PROFILE
++ CHECK_CHALLENGE
++ GET_HATCHED_EGGS
++ GET_INVENTORY(last_timestamp_ms="YOUR_REAL_CURRENT_TIMESTAMP")
++ CHECK_AWARDED_BADGES
++ DOWNLOAD_SETTINGS(hash="THE_HASH_IN_RESP_DOWNLOAD_SETTINGS_OF_REQ_3")
++ GET_BUDDY_WALKED
++++ signature
+
+5. LEVEL_UP_REWARDS(level="THE_PLAYER_LEVEL_IN_RESP_GET_INVENTORY_OF_REQ_3")
++ CHECK_CHALLENGE
++ GET_HATCHED_EGGS
++ GET_INVENTORY(last_timestamp_ms="YOUR_REAL_CURRENT_TIMESTAMP")
++ CHECK_AWARDED_BADGES
++ DOWNLOAD_SETTINGS(hash="THE_HASH_IN_RESP_DOWNLOAD_SETTINGS_OF_REQ_3")
++ GET_BUDDY_WALKED
++++ signature
+
+6. empty request
++++ GET_STORE_ITEMS
++++ signature
+
+7. GET_MAP_OBJECTS(cell_id={whatever}, since_timestamp_ms={whatever}, latitude=xx, longitude=yy)
++ CHECK_CHALLENGE
++ GET_HATCHED_EGGS
++ GET_INVENTORY(last_timestamp_ms="YOUR_REAL_CURRENT_TIMESTAMP")
++ CHECK_AWARDED_BADGES
++ DOWNLOAD_SETTINGS(hash="THE_HASH_IN_RESP_DOWNLOAD_SETTINGS_OF_REQ_3")
++ GET_BUDDY_WALKED
++++ signature
