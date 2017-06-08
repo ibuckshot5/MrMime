@@ -10,7 +10,7 @@ from pgoapi.exceptions import AuthException, PgoapiError, \
     BannedAccountException
 from pgoapi.protos.pogoprotos.inventory.item.item_id_pb2 import *
 
-from mrmime import player_locale, pogo_account_config, APP_VERSION, avatar
+from mrmime import _mr_mime_cfg, APP_VERSION, avatar
 
 log = logging.getLogger(__name__)
 
@@ -21,8 +21,10 @@ class POGOAccount(object):
         self.auth_service = auth_service
         self.username = username
         self.password = password
-        self.proxy_url = proxy_url
         self.hash_key = hash_key
+        self.proxy_url = proxy_url
+
+        self.cfg = _mr_mime_cfg.copy()
 
         # Tutorial state and warn/ban flags
         self.player_state = {}
@@ -95,7 +97,7 @@ class POGOAccount(object):
         # Try to login. Repeat a few times, but don't get stuck here.
         num_tries = 0
         # One initial try + login_retries.
-        while num_tries < pogo_account_config['login_retries']:
+        while num_tries < self.cfg['login_retries']:
             try:
                 num_tries += 1
                 self.log_info("Login try {}.".format(num_tries))
@@ -118,10 +120,10 @@ class POGOAccount(object):
             except AuthException:
                 self.log_error(
                     'Failed to login. Trying again in {} seconds.'.format(
-                        pogo_account_config['login_delay']))
-                time.sleep(pogo_account_config['login_delay'])
+                        self.cfg['login_delay']))
+                time.sleep(self.cfg['login_delay'])
 
-        if num_tries >= pogo_account_config['login_retries']:
+        if num_tries >= self.cfg['login_retries']:
             self.log_error(
                 'Failed to login in {} tries. Giving up.'.format(num_tries))
             return False
@@ -143,7 +145,7 @@ class POGOAccount(object):
     def update_player_state(self):
         request = self._api.create_request()
         request.get_player(
-            player_locale=player_locale)
+            player_locale=self.cfg['player_locale'])
 
         responses = self._call_request(request)
 
@@ -173,6 +175,9 @@ class POGOAccount(object):
     def has_captcha(self):
         return None if not self.is_logged_in() else (
             self.captcha_url and len(self.captcha_url) > 1)
+
+    def uses_proxy(self):
+        return self.proxy_url is not None and len(self.proxy_url) > 0
 
     # =======================================================================
 
@@ -427,7 +432,8 @@ class POGOAccount(object):
             time.sleep(random.uniform(.35, .525))
 
             self.perform_request(
-                lambda req: req.get_player(player_locale=player_locale),
+                lambda req: req.get_player(
+                    player_locale=self.cfg['player_locale']),
                 buddy_walked=False)
             time.sleep(1)
 
@@ -453,7 +459,7 @@ class POGOAccount(object):
 
             time.sleep(random.uniform(.4, .5))
             responses = self.perform_request(
-                lambda req: req.get_player(player_locale=player_locale))
+                lambda req: req.get_player(player_locale=self.cfg['player_locale']))
 
             try:
                 inventory = responses[
@@ -476,7 +482,7 @@ class POGOAccount(object):
 
             time.sleep(.7)
             self.perform_request(
-                lambda req: req.get_player(player_locale=player_locale))
+                lambda req: req.get_player(player_locale=self.cfg['player_locale']))
             time.sleep(.13)
 
             self.perform_request(lambda req: req.mark_tutorial_complete(
