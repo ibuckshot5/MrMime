@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 
 class POGOAccount(object):
 
-    def __init__(self, auth_service, username, password, proxy_url=None, hash_key=None):
+    def __init__(self, auth_service, username, password, hash_key=None, proxy_url=None):
         self.auth_service = auth_service
         self.username = username
         self.password = password
