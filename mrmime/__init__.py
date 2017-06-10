@@ -9,7 +9,8 @@ _mr_mime_cfg = {
         'timezone': 'America/Denver'
     },
     'login_retries': 3,
-    'login_delay': 6
+    'login_delay': 6,
+    'scan_delay': 10
 }
 
 

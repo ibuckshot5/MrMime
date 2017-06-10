@@ -1,6 +1,5 @@
 import hashlib
 import logging
-import math
 import random
 import time
 
@@ -9,8 +8,11 @@ from pgoapi import PGoApi
 from pgoapi.exceptions import AuthException, PgoapiError, \
     BannedAccountException
 from pgoapi.protos.pogoprotos.inventory.item.item_id_pb2 import *
+from pgoapi.utilities import get_cell_ids, f2i
 
 from mrmime import _mr_mime_cfg, APP_VERSION, avatar
+from mrmime.responses import parse_inventory_delta, parse_player_stats
+from mrmime.utils import jitter_location
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +41,11 @@ class POGOAccount(object):
         self.inventory_balls = 0
         self.inventory_total = 0
 
+        # Location
+        self.latitude = None
+        self.longitude = None
+        self.altitude = None
+
         # Last log message (for GUI/console)
         self.last_msg = ""
 
@@ -50,35 +57,56 @@ class POGOAccount(object):
         self._item_templates_time = 0
 
         # Timestamp when last API request was made
-        self._last_request = None
+        self._last_request = 0
+
+        # Timestamp of last get_map_objects request
+        self._last_gmo = self._last_request
 
         # Timestamp for incremental inventory updates
         self._last_timestamp_ms = None
 
+        # Timestamp when previous user action is completed
+        self._last_action = 0
+
     def set_position(self, lat, lng, alt):
+        """Sets the location and altitude of the account"""
         self._api.set_position(lat, lng, alt)
+        self.latitude = lat
+        self.longitude = lng
+        self.altitude = alt
 
     def perform_request(self, add_main_request, download_settings=False,
-                        buddy_walked=True, action=None):
+                        buddy_walked=True, action=None, jitter=True):
         request = self._api.create_request()
+
+        # Add main request
         add_main_request(request)
+
+        # Standard requests with every call
         request.check_challenge()
         request.get_hatched_eggs()
+
+        # Check inventory with correct timestamp
         if self._last_timestamp_ms:
             request.get_inventory(last_timestamp_ms=self._last_timestamp_ms)
         else:
             request.get_inventory()
+
+        # Always check awarded badges
         request.check_awarded_badges()
-        # Optional requests
+
+        # Optional: download settings (with correct hash value)
         if download_settings:
             if self._download_settings_hash:
                 request.download_settings(hash=self._download_settings_hash)
             else:
                 request.download_settings()
+
+        # Optional: request buddy kilometers
         if buddy_walked:
             request.get_buddy_walked()
 
-        return self._call_request(request)
+        return self._call_request(request, action, jitter)
 
     # Use API to check the login status, and retry the login if possible.
     def check_login(self):
@@ -179,6 +207,30 @@ class POGOAccount(object):
     def uses_proxy(self):
         return self.proxy_url is not None and len(self.proxy_url) > 0
 
+    def req_get_map_objects(self):
+        """Scans current account location."""
+        # Make sure that we don't hammer with GMO requests
+        diff = self._last_gmo + self.cfg['scan_delay'] - time.time()
+        if diff > 0:
+            time.sleep(diff)
+
+        # We jitter here because we need the jittered location NOW
+        lat, lng = jitter_location(self.latitude, self.longitude)
+        self._api.set_position(lat, lng, self.altitude)
+
+        cell_ids = get_cell_ids(lat, lng)
+        timestamps = [0, ] * len(cell_ids)
+        responses = self.perform_request(
+            lambda req: req.get_map_objects(latitude=f2i(lat),
+                                            longitude=f2i(lng),
+                                            since_timestamp_ms=timestamps,
+                                            cell_id=cell_ids),
+            jitter=False # we already jittered
+        )
+        self._last_gmo = self._last_request
+
+        return responses
+
     # =======================================================================
 
     def _generate_device_info(self):
@@ -237,9 +289,22 @@ class POGOAccount(object):
 
         return device_info
 
-    def _call_request(self, request):
+    def _call_request(self, request, action=None, jitter=True):
+        # Wait until a previous user action gets completed
+        if action:
+            now = time.time()
+            # wait for the time required, or at least a half-second
+            if self._last_action > now + .5:
+                time.sleep(self._last_action - now)
+            else:
+                time.sleep(0.5)
+
         # Set hash key for this request
         self._api.activate_hash_server(self.hash_key)
+
+        if jitter:
+            lat, lng = jitter_location(self.latitude, self.longitude)
+            self._api.set_position(lat, lng, self.altitude)
 
         response = request.call()
         self._last_request = time.time()
@@ -250,7 +315,12 @@ class POGOAccount(object):
             raise BannedAccountException
 
         if not 'responses' in response:
+            self.log_error("Got no responses at all!")
             return {}
+
+        # Set the timer when the user action will be completed
+        if action:
+            self._last_action = self._last_request + action
 
         # Return only the responses
         responses = response['responses']
@@ -258,31 +328,6 @@ class POGOAccount(object):
         self._parse_responses(responses)
 
         return responses
-
-    def _get_inventory_delta(self, inv_response):
-        inventory_items = inv_response.get('inventory_delta', {}).get(
-            'inventory_items', [])
-        inventory = {}
-        no_item_ids = (
-            ITEM_UNKNOWN,
-            ITEM_TROY_DISK,
-            ITEM_X_ATTACK,
-            ITEM_X_DEFENSE,
-            ITEM_X_MIRACLE,
-            ITEM_POKEMON_STORAGE_UPGRADE,
-            ITEM_ITEM_STORAGE_UPGRADE
-        )
-        for item in inventory_items:
-            iid = item.get('inventory_item_data', {})
-            if 'item' in iid and iid['item']['item_id'] not in no_item_ids:
-                item_id = iid['item']['item_id']
-                count = iid['item'].get('count', 0)
-                inventory[item_id] = count
-            elif 'egg_incubators' in iid and 'egg_incubator' in iid['egg_incubators']:
-                for incubator in iid['egg_incubators']['egg_incubator']:
-                    item_id = incubator['item_id']
-                    inventory[item_id] = inventory.get(item_id, 0) + 1
-        return inventory
 
     def _update_inventory_totals(self):
         ball_ids = [
@@ -313,12 +358,12 @@ class POGOAccount(object):
                     self.inventory = {}
 
                 # Update inventory (balls, items)
-                inventory_delta = self._get_inventory_delta(api_inventory)
+                inventory_delta = parse_inventory_delta(api_inventory)
                 self.inventory.update(inventory_delta)
                 self._update_inventory_totals()
 
                 # Update stats (level, xp, encounters, captures, km walked, etc.)
-                self._update_player_stats(api_inventory)
+                self.player_stats.update(parse_player_stats(api_inventory))
 
                 # Update last timestamp for inventory requests
                 self._last_timestamp_ms = api_inventory[
@@ -331,21 +376,13 @@ class POGOAccount(object):
             if response_type == 'DOWNLOAD_SETTINGS':
                 if 'hash' in response:
                     self._download_settings_hash = response['hash']
+                # TODO: Check forced client version and exit program if different
 
             # Check for captcha
             if response_type == 'CHECK_CHALLENGE':
                 self.captcha_url = response.get('challenge_url')
                 if self.has_captcha():
                     raise CaptchaException
-
-
-    def _update_player_stats(self, api_inventory):
-        inventory_items = api_inventory.get('inventory_delta', {}).get(
-            'inventory_items', [])
-        for item in inventory_items:
-            item_data = item.get('inventory_item_data', {})
-            if 'player_stats' in item_data:
-                self.player_stats.update(item_data['player_stats'])
 
     def _initial_login_request_flow(self):
         # Empty request -----------------------------------------------------
@@ -567,14 +604,6 @@ class POGOAccount(object):
             page_offset = response.get('page_offset')
             page_timestamp = response['timestamp_ms']
         self._item_templates_time = template_time
-
-    def jitter_location(self, lat, lng, maxMeters=10):
-        origin = geopy.Point(lat, lng)
-        b = random.randint(0, 360)
-        d = math.sqrt(random.random()) * (float(maxMeters) / 1000)
-        destination = geopy.distance.distance(kilometers=d).destination(origin,
-                                                                        b)
-        return (destination.latitude, destination.longitude)
 
     def log_info(self, msg):
         self.last_msg = msg
