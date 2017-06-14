@@ -1,5 +1,5 @@
 # Needed for download_remote_config_version request.
-APP_VERSION = 6301
+APP_VERSION = 6304
 
 
 _mr_mime_cfg = {
