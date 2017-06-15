@@ -11,6 +11,7 @@ _mr_mime_cfg = {
         'language': 'en',
         'timezone': 'America/Denver'
     },
+    'parallel_logins': True,
     'login_retries': 3,
     'login_delay': 6,
     'scan_delay': 10

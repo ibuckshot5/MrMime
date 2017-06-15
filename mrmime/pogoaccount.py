@@ -2,6 +2,7 @@ import hashlib
 import logging
 import random
 import time
+from threading import Lock
 
 import geopy
 from pgoapi import PGoApi
@@ -15,7 +16,7 @@ from mrmime.responses import parse_inventory_delta, parse_player_stats
 from mrmime.utils import jitter_location
 
 log = logging.getLogger(__name__)
-
+login_lock = Lock()
 
 class POGOAccount(object):
 
@@ -114,60 +115,68 @@ class POGOAccount(object):
         if self._api.get_auth_provider() and self._api.get_auth_provider().check_ticket():
             return True
 
-        # Set proxy if given.
-        if self.proxy_url:
-            self._api.set_proxy({
-                'http': self.proxy_url,
-                'https': self.proxy_url
-            })
-            self.log_info("Using proxy: {}".format(self.proxy_url))
-
-        # Try to login. Repeat a few times, but don't get stuck here.
-        num_tries = 0
-        # One initial try + login_retries.
-        while num_tries < self.cfg['login_retries']:
-            try:
-                num_tries += 1
-                self.log_info("Login try {}.".format(num_tries))
-                if self.proxy_url:
-                    self._api.set_authentication(
-                        provider=self.auth_service,
-                        username=self.username,
-                        password=self.password,
-                        proxy_config={
-                            'http': self.proxy_url,
-                            'https': self.proxy_url
-                        })
-                else:
-                    self._api.set_authentication(
-                        provider=self.auth_service,
-                        username=self.username,
-                        password=self.password)
-                self.log_info("Login successful after {} tries.".format(num_tries))
-                break
-            except AuthException:
-                self.log_error(
-                    'Failed to login. Trying again in {} seconds.'.format(
-                        self.cfg['login_delay']))
-                time.sleep(self.cfg['login_delay'])
-
-        if num_tries >= self.cfg['login_retries']:
-            self.log_error(
-                'Failed to login in {} tries. Giving up.'.format(num_tries))
-            return False
-
         try:
-            return self._initial_login_request_flow()
-        except BannedAccountException:
-            self.log_warning("Account most probably BANNED! :-(((")
-            self.player_state['banned'] = True
-            return False
-        except CaptchaException:
-            self.log_warning("Account got CAPTCHA'd! :-|")
-            return False
-        except Exception as e:
-            self.log_error("Login failed: {}".format(repr(e)))
-            return False
+            if not self.cfg['parallel_logins']:
+                login_lock.acquire()
+
+            # Set proxy if given.
+            if self.proxy_url:
+                self._api.set_proxy({
+                    'http': self.proxy_url,
+                    'https': self.proxy_url
+                })
+                self.log_info("Using proxy: {}".format(self.proxy_url))
+
+            # Try to login. Repeat a few times, but don't get stuck here.
+            num_tries = 0
+            # One initial try + login_retries.
+            while num_tries < self.cfg['login_retries']:
+                try:
+                    num_tries += 1
+                    self.log_info("Login try {}.".format(num_tries))
+                    if self.proxy_url:
+                        self._api.set_authentication(
+                            provider=self.auth_service,
+                            username=self.username,
+                            password=self.password,
+                            proxy_config={
+                                'http': self.proxy_url,
+                                'https': self.proxy_url
+                            })
+                    else:
+                        self._api.set_authentication(
+                            provider=self.auth_service,
+                            username=self.username,
+                            password=self.password)
+                    self.log_info("Login successful after {} tries.".format(num_tries))
+                    break
+                except AuthException:
+                    self.log_error(
+                        'Failed to login. Trying again in {} seconds.'.format(
+                            self.cfg['login_delay']))
+                    time.sleep(self.cfg['login_delay'])
+
+            if num_tries >= self.cfg['login_retries']:
+                self.log_error(
+                    'Failed to login in {} tries. Giving up.'.format(num_tries))
+                return False
+
+            try:
+                return self._initial_login_request_flow()
+            except BannedAccountException:
+                self.log_warning("Account most probably BANNED! :-(((")
+                self.player_state['banned'] = True
+                return False
+            except CaptchaException:
+                self.log_warning("Account got CAPTCHA'd! :-|")
+                return False
+            except Exception as e:
+                self.log_error("Login failed: {}".format(repr(e)))
+                return False
+        finally:
+            if not self.cfg['parallel_logins']:
+                login_lock.release()
+
 
     # Returns warning/banned flags and tutorial state.
     def update_player_state(self):
