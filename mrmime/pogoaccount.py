@@ -10,7 +10,7 @@ from pgoapi.exceptions import AuthException, PgoapiError, \
 from pgoapi.protos.pogoprotos.inventory.item.item_id_pb2 import *
 from pgoapi.utilities import get_cell_ids, f2i
 
-from mrmime import _mr_mime_cfg, APP_VERSION, avatar
+from mrmime import _mr_mime_cfg, APP_VERSION, avatar, API_VERSION
 from mrmime.responses import parse_inventory_delta, parse_player_stats
 from mrmime.utils import jitter_location
 
@@ -231,7 +231,70 @@ class POGOAccount(object):
 
         return responses
 
-    # =======================================================================
+    def req_encounter(self, encounter_id, spawn_point_id, latitude, longitude):
+        return self.perform_request(lambda req: req.encounter(
+            encounter_id=encounter_id,
+            spawn_point_id=spawn_point_id,
+            player_latitude=latitude,
+            player_longitude=longitude))
+
+    def req_catch_pokemon(self, encounter_id, spawn_point_id, ball,
+                          normalized_reticle_size, spin_modifier):
+        return self.perform_request(lambda req: req.catch_pokemon(
+                encounter_id=encounter_id,
+                pokeball=ball,
+                normalized_reticle_size=normalized_reticle_size,
+                spawn_point_id=spawn_point_id,
+                hit_pokemon=1,
+                spin_modifier=spin_modifier,
+                normalized_hit_position=1.0))
+
+    def req_release_pokemon(self, pokemon_id):
+        return self.perform_request(
+            lambda req: req.release_pokemon(pokemon_id=pokemon_id))
+
+    def req_fort_search(self, fort_id, fort_lat, fort_lng, player_lat,
+                        player_lng):
+        return self.perform_request(lambda req: req.fort_search(
+            fort_id=fort_id,
+            fort_latitude=fort_lat,
+            fort_longitude=fort_lng,
+            player_latitude=player_lat,
+            player_longitude=player_lng))
+
+    def req_get_gym_details(self, gym_id, gym_lat, gym_lng, player_lat, player_lng):
+        return self.perform_request(
+            lambda req: req.get_gym_details(gym_id=gym_id,
+                                            player_latitude=f2i(player_lat),
+                                            player_longitude=f2i(player_lng),
+                                            gym_latitude=gym_lat,
+                                            gym_longitude=gym_lng,
+                                            client_version=API_VERSION))
+
+    def req_recycle_inventory_item(self, item_id, amount):
+        return self.perform_request(lambda req: req.recycle_inventory_item(
+            item_id=item_id,
+            count=amount))
+
+    def req_level_up_rewards(self, level):
+        return self.perform_request(
+            lambda req: req.level_up_rewards(level=level))
+
+    def req_verify_challenge(self, captcha_token):
+        req = self._api.create_request()
+        req.verify_challenge(token=captcha_token)
+        responses = self._call_request(req)
+        if 'VERIFY_CHALLENGE' in responses:
+            response = responses['VERIFY_CHALLENGE']
+            if 'success' in response:
+                self.captcha_url = None
+                self.log_info("Successfully uncaptcha'd.")
+                return True
+            else:
+                self.log_warning("Failed verifyChallenge")
+                return False
+
+        # =======================================================================
 
     def _generate_device_info(self):
         identifier = self.username + self.password
@@ -339,8 +402,6 @@ class POGOAccount(object):
         balls = 0
         total_items = 0
         for item_id in self.inventory:
-            if item_id in ['total', 'balls']:
-                continue
             if item_id in ball_ids:
                 balls += self.inventory[item_id]
             total_items += self.inventory[item_id]
@@ -373,13 +434,13 @@ class POGOAccount(object):
                 del responses[response_type]
 
             # Get settings hash from response for future calls
-            if response_type == 'DOWNLOAD_SETTINGS':
+            elif response_type == 'DOWNLOAD_SETTINGS':
                 if 'hash' in response:
                     self._download_settings_hash = response['hash']
                 # TODO: Check forced client version and exit program if different
 
             # Check for captcha
-            if response_type == 'CHECK_CHALLENGE':
+            elif response_type == 'CHECK_CHALLENGE':
                 self.captcha_url = response.get('challenge_url')
                 if self.has_captcha():
                     raise CaptchaException

@@ -1,6 +1,9 @@
 # Needed for download_remote_config_version request.
 APP_VERSION = 6304
 
+# Needed for get_gym_details request.
+API_VERSION = '0.63.1'
+
 
 _mr_mime_cfg = {
     'player_locale': {
