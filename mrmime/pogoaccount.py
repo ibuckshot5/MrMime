@@ -29,6 +29,7 @@ class POGOAccount(object):
         self.password = password
 
         # Initialize hash keys
+        self._hash_key = None
         if hash_key_provider and not hash_key_provider.is_empty():
             self._hash_key_provider = hash_key_provider
         elif hash_key:
@@ -36,10 +37,10 @@ class POGOAccount(object):
             self._hash_key_provider.add_resource(hash_key)
         else:
             self._hash_key_provider = CyclicResourceProvider()
-            self.log_warning("Initialized without hash_key.")
+            self.log_debug("Initialized without hash_key.")
 
         # Initialize proxies
-        self.proxy_url = None
+        self._proxy_url = None
         if proxy_provider and not proxy_provider.is_empty():
             self._proxy_provider = proxy_provider
         elif proxy_url:
@@ -142,13 +143,12 @@ class POGOAccount(object):
 
             # Set proxy if given.
             if self._proxy_provider:
-                self.proxy_url = self._proxy_provider.next()
-                self.log_debug("Using proxy {}".format(self.proxy_url))
+                self._proxy_url = self._proxy_provider.next()
+                self.log_debug("Using proxy {}".format(self._proxy_url))
                 self._api.set_proxy({
-                    'http': self.proxy_url,
-                    'https': self.proxy_url
+                    'http': self._proxy_url,
+                    'https': self._proxy_url
                 })
-                self.log_info("Using proxy: {}".format(self.proxy_url))
 
             # Try to login. Repeat a few times, but don't get stuck here.
             num_tries = 0
@@ -157,14 +157,14 @@ class POGOAccount(object):
                 try:
                     num_tries += 1
                     self.log_info("Login try {}.".format(num_tries))
-                    if self.proxy_url:
+                    if self._proxy_url:
                         self._api.set_authentication(
                             provider=self.auth_service,
                             username=self.username,
                             password=self.password,
                             proxy_config={
-                                'http': self.proxy_url,
-                                'https': self.proxy_url
+                                'http': self._proxy_url,
+                                'https': self._proxy_url
                             })
                     else:
                         self._api.set_authentication(
@@ -197,6 +197,7 @@ class POGOAccount(object):
                 except Exception as e:
                     self.log_error("Login failed: {}".format(repr(e)))
                     return False
+            return True
         finally:
             if not self.cfg['parallel_logins']:
                 login_lock.release()
@@ -238,7 +239,7 @@ class POGOAccount(object):
             self.captcha_url and len(self.captcha_url) > 1)
 
     def uses_proxy(self):
-        return self.proxy_url is not None and len(self.proxy_url) > 0
+        return self._proxy_url is not None and len(self._proxy_url) > 0
 
     def req_get_map_objects(self):
         """Scans current account location."""
@@ -396,9 +397,9 @@ class POGOAccount(object):
                 time.sleep(0.5)
 
         # Set hash key for this request
-        hash_key = self._hash_key_provider.next()
-        self.log_debug("Using hash key {}".format(hash_key))
-        self._api.activate_hash_server(hash_key)
+        self._hash_key = self._hash_key_provider.next()
+        self.log_debug("Using hash key {}".format(self._hash_key))
+        self._api.activate_hash_server(self._hash_key)
 
         if jitter:
             lat, lng = jitter_location(self.latitude, self.longitude)
@@ -498,12 +499,17 @@ class POGOAccount(object):
         time.sleep(1)
 
         # Assets and item templates -----------------------------------------
-        if asset_time > self._asset_time:
+        if self.cfg['download_assets_and_items'] and asset_time > self._asset_time:
             self.log_debug("Login Flow: Download asset digest")
             self._get_asset_digest(asset_time)
-        if template_time > self._item_templates_time:
+        else:
+            self.log_debug("Login Flow: Skipping asset digest download")
+
+        if self.cfg['download_assets_and_items'] and template_time > self._item_templates_time:
             self.log_debug("Login Flow: Download item templates")
             self._download_item_templates(template_time)
+        else:
+            self.log_debug("Login Flow: Skipping item template download")
 
         # Checking tutorial -------------------------------------------------
         if (self.player_state['tutorial_state'] is not None and
@@ -704,12 +710,27 @@ class POGOAccount(object):
             page_timestamp = response['timestamp_ms']
         self._item_templates_time = template_time
 
+    def __getattr__(self, item):
+        # Backwards compatibility
+        if item == 'hash_key':
+            return self._hash_key
+        elif item == 'proxy_url':
+            return self._proxy_url
+        else:
+            return self[item]
+
     def __setattr__(self, key, value):
-        # If we set hash key directly, create a hash key provider with exactly one key
         if key == 'hash_key':
+            # Workaround to directly set one hash key.
             self._hash_key_provider.set_single_resource(value)
+            self._hash_key = value
         elif key == 'proxy_url':
+            # Workaround to directly set one proxy.
             self._proxy_provider.set_single_resource(value)
+            self._proxy_url = value
+        else:
+            # Default: just set the property the normal way
+            super(POGOAccount, self).__setattr__(key, value)
 
     def log_info(self, msg):
         self.last_msg = msg

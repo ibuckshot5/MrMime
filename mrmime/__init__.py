@@ -23,6 +23,7 @@ _mr_mime_cfg = {
     'login_retries': 3,                 # Number of login retries
     'login_delay': 6,                   # Delay between login retries
     'full_login_flow': True,            # Whether login flow requests should be performed or not
+    'download_assets_and_items': True,  # Whether to perform download_asset_digest and download_item_templates requests at all
     'scan_delay': 10                    # Wait at least this long between 2 GMO requests
 }
 
