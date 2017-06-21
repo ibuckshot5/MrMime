@@ -5,6 +5,7 @@ import time
 from threading import Lock
 
 import geopy
+from mrmime.cyclicresourceprovider import CyclicResourceProvider
 from pgoapi import PGoApi
 from pgoapi.exceptions import AuthException, PgoapiError, \
     BannedAccountException
@@ -18,14 +19,34 @@ from mrmime.utils import jitter_location
 log = logging.getLogger(__name__)
 login_lock = Lock()
 
+
 class POGOAccount(object):
 
-    def __init__(self, auth_service, username, password, hash_key=None, proxy_url=None):
+    def __init__(self, auth_service, username, password, hash_key=None,
+                 hash_key_provider=None, proxy_url=None, proxy_provider=None):
         self.auth_service = auth_service
         self.username = username
         self.password = password
-        self.hash_key = hash_key
-        self.proxy_url = proxy_url
+
+        # Initialize hash keys
+        if hash_key_provider and not hash_key_provider.is_empty():
+            self._hash_key_provider = hash_key_provider
+        elif hash_key:
+            self._hash_key_provider = CyclicResourceProvider()
+            self._hash_key_provider.add_resource(hash_key)
+        else:
+            self._hash_key_provider = CyclicResourceProvider()
+            self.log_warning("Initialized without hash_key.")
+
+        # Initialize proxies
+        self.proxy_url = None
+        if proxy_provider and not proxy_provider.is_empty():
+            self._proxy_provider = proxy_provider
+        elif proxy_url:
+            self._proxy_provider = CyclicResourceProvider()
+            self._proxy_provider.add_resource(proxy_url)
+        else:
+            self._proxy_provider = None
 
         self.cfg = _mr_mime_cfg.copy()
 
@@ -120,7 +141,9 @@ class POGOAccount(object):
                 login_lock.acquire()
 
             # Set proxy if given.
-            if self.proxy_url:
+            if self._proxy_provider:
+                self.proxy_url = self._proxy_provider.next()
+                self.log_debug("Using proxy {}".format(self.proxy_url))
                 self._api.set_proxy({
                     'http': self.proxy_url,
                     'https': self.proxy_url
@@ -161,18 +184,19 @@ class POGOAccount(object):
                     'Failed to login in {} tries. Giving up.'.format(num_tries))
                 return False
 
-            try:
-                return self._initial_login_request_flow()
-            except BannedAccountException:
-                self.log_warning("Account most probably BANNED! :-(((")
-                self.player_state['banned'] = True
-                return False
-            except CaptchaException:
-                self.log_warning("Account got CAPTCHA'd! :-|")
-                return False
-            except Exception as e:
-                self.log_error("Login failed: {}".format(repr(e)))
-                return False
+            if self.cfg['full_login_flow'] is True:
+                try:
+                    return self._initial_login_request_flow()
+                except BannedAccountException:
+                    self.log_warning("Account most probably BANNED! :-(((")
+                    self.player_state['banned'] = True
+                    return False
+                except CaptchaException:
+                    self.log_warning("Account got CAPTCHA'd! :-|")
+                    return False
+                except Exception as e:
+                    self.log_error("Login failed: {}".format(repr(e)))
+                    return False
         finally:
             if not self.cfg['parallel_logins']:
                 login_lock.release()
@@ -303,7 +327,7 @@ class POGOAccount(object):
                 self.log_warning("Failed verifyChallenge")
                 return False
 
-        # =======================================================================
+    # =======================================================================
 
     def _generate_device_info(self):
         identifier = self.username + self.password
@@ -372,7 +396,9 @@ class POGOAccount(object):
                 time.sleep(0.5)
 
         # Set hash key for this request
-        self._api.activate_hash_server(self.hash_key)
+        hash_key = self._hash_key_provider.next()
+        self.log_debug("Using hash key {}".format(hash_key))
+        self._api.activate_hash_server(hash_key)
 
         if jitter:
             lat, lng = jitter_location(self.latitude, self.longitude)
@@ -468,7 +494,7 @@ class POGOAccount(object):
 
         # Download remote config --------------------------------------------
         self.log_debug("Login Flow: Downloading remote config")
-        asset_time, template_time = self._download_remote_config()
+        asset_time, template_time = self._download_remote_config_version()
         time.sleep(1)
 
         # Assets and item templates -----------------------------------------
@@ -614,11 +640,14 @@ class POGOAccount(object):
         time.sleep(.2)
         return True
 
-    def _download_remote_config(self):
+    def _download_remote_config_version(self):
         responses = self.perform_request(
             lambda req: req.download_remote_config_version(platform=1,
                                                            app_version=APP_VERSION),
             download_settings=True, buddy_walked=False)
+        if 'DOWNLOAD_REMOTE_CONFIG_VERSION' not in responses:
+            raise Exception("Call to download_remote_config_version did not"
+                            " return proper response.")
         remote_config = responses['DOWNLOAD_REMOTE_CONFIG_VERSION']
         return remote_config['asset_digest_timestamp_ms'] / 1000000, \
                remote_config['item_templates_timestamp_ms'] / 1000
@@ -674,6 +703,13 @@ class POGOAccount(object):
             page_offset = response.get('page_offset')
             page_timestamp = response['timestamp_ms']
         self._item_templates_time = template_time
+
+    def __setattr__(self, key, value):
+        # If we set hash key directly, create a hash key provider with exactly one key
+        if key == 'hash_key':
+            self._hash_key_provider.set_single_resource(value)
+        elif key == 'proxy_url':
+            self._proxy_provider.set_single_resource(value)
 
     def log_info(self, msg):
         self.last_msg = msg

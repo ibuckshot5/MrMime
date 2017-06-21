@@ -15,6 +15,7 @@ _mr_mime_cfg = {
     'login_retries': 3,
     'login_delay': 6,
     'scan_delay': 10
+    'full_login_flow': True,            # Whether login flow requests should be performed or not
 }
 
 
