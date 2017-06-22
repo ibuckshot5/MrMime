@@ -396,8 +396,10 @@ class POGOAccount(object):
                 time.sleep(0.5)
 
         # Set hash key for this request
+        old_hash_key = self._hash_key
         self._hash_key = self._hash_key_provider.next()
-        self.log_debug("Using hash key {}".format(self._hash_key))
+        if self._hash_key != old_hash_key:
+            self.log_debug("Using hash key {}".format(self._hash_key))
         self._api.activate_hash_server(self._hash_key)
 
         if jitter:
@@ -481,6 +483,8 @@ class POGOAccount(object):
                     raise CaptchaException
 
     def _initial_login_request_flow(self):
+        self.log_info("Performing full login flow requests")
+
         # Empty request -----------------------------------------------------
         self.log_debug("Login Flow: Empty request")
         request = self._api.create_request()
