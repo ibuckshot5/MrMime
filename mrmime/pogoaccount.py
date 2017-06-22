@@ -4,8 +4,6 @@ import random
 import time
 from threading import Lock
 
-import geopy
-from mrmime.cyclicresourceprovider import CyclicResourceProvider
 from pgoapi import PGoApi
 from pgoapi.exceptions import AuthException, PgoapiError, \
     BannedAccountException
@@ -13,6 +11,7 @@ from pgoapi.protos.pogoprotos.inventory.item.item_id_pb2 import *
 from pgoapi.utilities import get_cell_ids, f2i
 
 from mrmime import _mr_mime_cfg, APP_VERSION, avatar, API_VERSION
+from mrmime.cyclicresourceprovider import CyclicResourceProvider
 from mrmime.responses import parse_inventory_delta, parse_player_stats
 from mrmime.utils import jitter_location
 
