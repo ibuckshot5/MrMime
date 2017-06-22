@@ -22,6 +22,7 @@ _mr_mime_cfg = {
     },
     # --- general
     'parallel_logins': True,            # Parallel logins increases number of requests.
+    'retry_on_hash_quota_exceeded': True,
     # --- account login specific
     'login_retries': 3,                 # Number of login retries
     'login_delay': 6,                   # Delay between login retries

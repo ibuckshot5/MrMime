@@ -6,7 +6,7 @@ from threading import Lock
 
 from pgoapi import PGoApi
 from pgoapi.exceptions import AuthException, PgoapiError, \
-    BannedAccountException
+    BannedAccountException, HashingQuotaExceededException
 from pgoapi.protos.pogoprotos.inventory.item.item_id_pb2 import *
 from pgoapi.utilities import get_cell_ids, f2i
 
@@ -395,19 +395,29 @@ class POGOAccount(object):
             else:
                 time.sleep(0.5)
 
-        # Set hash key for this request
-        old_hash_key = self._hash_key
-        self._hash_key = self._hash_key_provider.next()
-        if self._hash_key != old_hash_key:
-            self.log_debug("Using hash key {}".format(self._hash_key))
-        self._api.activate_hash_server(self._hash_key)
-
         if jitter:
             lat, lng = jitter_location(self.latitude, self.longitude)
             self._api.set_position(lat, lng, self.altitude)
 
-        response = request.call()
-        self._last_request = time.time()
+        success = False
+        while not success:
+            try:
+                # Set hash key for this request
+                old_hash_key = self._hash_key
+                self._hash_key = self._hash_key_provider.next()
+                if self._hash_key != old_hash_key:
+                    self.log_debug("Using hash key {}".format(self._hash_key))
+                self._api.activate_hash_server(self._hash_key)
+
+                response = request.call()
+                self._last_request = time.time()
+                success = True
+            except HashingQuotaExceededException:
+                if self.cfg['retry_on_hash_quota_exceeded'] == True:
+                    self.log_warn("Hashing quota exceeded. Retrying in 5s.")
+                    time.sleep(5)
+                else:
+                    raise
 
         # status_code 3 means BAD_REQUEST, so probably banned
         if 'status_code' in response and response['status_code'] == 3:
