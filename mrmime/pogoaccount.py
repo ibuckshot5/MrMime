@@ -98,7 +98,7 @@ class POGOAccount(object):
         self.altitude = alt
 
     def perform_request(self, add_main_request, download_settings=False,
-                        buddy_walked=True, action=None, jitter=True):
+                        buddy_walked=True, get_inbox=False, action=None, jitter=True):
         request = self._api.create_request()
 
         # Add main request
@@ -127,6 +127,9 @@ class POGOAccount(object):
         # Optional: request buddy kilometers
         if buddy_walked:
             request.get_buddy_walked()
+
+        if get_inbox:
+            request.get_inbox(is_history=True)
 
         return self._call_request(request, action, jitter)
 
@@ -258,6 +261,7 @@ class POGOAccount(object):
                                             longitude=f2i(lng),
                                             since_timestamp_ms=timestamps,
                                             cell_id=cell_ids),
+            get_inbox=True,
             jitter=False # we already jittered
         )
         self._last_gmo = self._last_request
@@ -269,7 +273,7 @@ class POGOAccount(object):
             encounter_id=encounter_id,
             spawn_point_id=spawn_point_id,
             player_latitude=latitude,
-            player_longitude=longitude))
+            player_longitude=longitude), get_inbox=True)
 
     def req_catch_pokemon(self, encounter_id, spawn_point_id, ball,
                           normalized_reticle_size, spin_modifier):
@@ -280,11 +284,11 @@ class POGOAccount(object):
                 spawn_point_id=spawn_point_id,
                 hit_pokemon=1,
                 spin_modifier=spin_modifier,
-                normalized_hit_position=1.0))
+                normalized_hit_position=1.0), get_inbox=True)
 
     def req_release_pokemon(self, pokemon_id):
         return self.perform_request(
-            lambda req: req.release_pokemon(pokemon_id=pokemon_id))
+            lambda req: req.release_pokemon(pokemon_id=pokemon_id), get_inbox=True)
 
     def req_fort_search(self, fort_id, fort_lat, fort_lng, player_lat,
                         player_lng):
@@ -293,7 +297,7 @@ class POGOAccount(object):
             fort_latitude=fort_lat,
             fort_longitude=fort_lng,
             player_latitude=player_lat,
-            player_longitude=player_lng))
+            player_longitude=player_lng), get_inbox=True)
 
     def req_get_gym_details(self, gym_id, gym_lat, gym_lng, player_lat, player_lng):
         return self.perform_request(
@@ -302,16 +306,16 @@ class POGOAccount(object):
                                             player_longitude=f2i(player_lng),
                                             gym_latitude=gym_lat,
                                             gym_longitude=gym_lng,
-                                            client_version=API_VERSION))
+                                            client_version=API_VERSION), get_inbox=True)
 
     def req_recycle_inventory_item(self, item_id, amount):
         return self.perform_request(lambda req: req.recycle_inventory_item(
             item_id=item_id,
-            count=amount))
+            count=amount), get_inbox=True)
 
     def req_level_up_rewards(self, level):
         return self.perform_request(
-            lambda req: req.level_up_rewards(level=level))
+            lambda req: req.level_up_rewards(level=level), get_inbox=True)
 
     def req_verify_challenge(self, captcha_token):
         req = self._api.create_request()
@@ -541,7 +545,7 @@ class POGOAccount(object):
         self.log_debug("Login Flow: Get levelup rewards")
         self.perform_request(
             lambda req: req.level_up_rewards(level=self.player_stats['level']),
-            download_settings=True)
+            download_settings=True, get_inbox=True)
 
         # Check store -------------------------------------------------------
         # TODO: There is currently no way to call the GET_STORE_ITEMS platform request.
