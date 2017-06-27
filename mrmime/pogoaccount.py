@@ -98,7 +98,7 @@ class POGOAccount(object):
         self.altitude = alt
 
     def perform_request(self, add_main_request, download_settings=False,
-                        buddy_walked=True, get_inbox=False, action=None, jitter=True):
+                        buddy_walked=True, get_inbox=True, action=None, jitter=True):
         request = self._api.create_request()
 
         # Add main request
@@ -204,24 +204,6 @@ class POGOAccount(object):
             if not self.cfg['parallel_logins']:
                 login_lock.release()
 
-
-    # Returns warning/banned flags and tutorial state.
-    def update_player_state(self):
-        request = self._api.create_request()
-        request.get_player(
-            player_locale=self.cfg['player_locale'])
-
-        responses = self._call_request(request)
-
-        get_player = responses.get('GET_PLAYER', {})
-        self.player_state = {
-            'tutorial_state': get_player.get('player_data', {}).get('tutorial_state', []),
-            'warn': get_player.get('warn', False),
-            'banned': get_player.get('banned', False)
-        }
-        if self.player_state.get('banned', False):
-            self.log_warning("GET_PLAYER has the 'banned' flag set.")
-            raise BannedAccountException
 
     def is_logged_in(self):
         # Logged in? Enough time left? Cool!
@@ -418,7 +400,7 @@ class POGOAccount(object):
                 success = True
             except HashingQuotaExceededException:
                 if self.cfg['retry_on_hash_quota_exceeded'] == True:
-                    self.log_warn("Hashing quota exceeded. Retrying in 5s.")
+                    self.log_warning("Hashing quota exceeded. Retrying in 5s.")
                     time.sleep(5)
                 else:
                     raise
@@ -490,6 +472,16 @@ class POGOAccount(object):
                     self._download_settings_hash = response['hash']
                 # TODO: Check forced client version and exit program if different
 
+            elif response_type == 'GET_PLAYER':
+                self.player_state = {
+                    'tutorial_state': response.get('player_data', {}).get('tutorial_state', []),
+                    'warn': response.get('warn', False),
+                    'banned': response.get('banned', False)
+                }
+                if self.player_state.get('banned', False):
+                    self.log_warning("GET_PLAYER has the 'banned' flag set.")
+                    raise BannedAccountException
+
             # Check for captcha
             elif response_type == 'CHECK_CHALLENGE':
                 self.captcha_url = response.get('challenge_url')
@@ -501,13 +493,18 @@ class POGOAccount(object):
 
         # Empty request -----------------------------------------------------
         self.log_debug("Login Flow: Empty request")
+        # ===== empty
         request = self._api.create_request()
         self._call_request(request)
         time.sleep(random.uniform(.43, .97))
 
         # Get player info ---------------------------------------------------
         self.log_debug("Login Flow: Get player state")
-        self.update_player_state()
+        # ===== GET_PLAYER (unchained)
+        request = self._api.create_request()
+        request.get_player(
+            player_locale=self.cfg['player_locale'])
+        self._call_request(request)
         time.sleep(random.uniform(.53, 1.1))
 
         # Download remote config --------------------------------------------
@@ -528,6 +525,8 @@ class POGOAccount(object):
         else:
             self.log_debug("Login Flow: Skipping item template download")
 
+        # TODO: Maybe download translation URLs from assets? Like pogonode?
+
         # Checking tutorial -------------------------------------------------
         if (self.player_state['tutorial_state'] is not None and
                 not all(x in self.player_state['tutorial_state'] for x in
@@ -537,15 +536,17 @@ class POGOAccount(object):
         else:
             # Get player profile
             self.log_debug("Login Flow: Get player profile")
+            # ===== GET_PLAYER_PROFILE
             self.perform_request(lambda req: req.get_player_profile(),
                                  download_settings=True)
             time.sleep(random.uniform(.2, .3))
 
         # Level up rewards --------------------------------------------------
         self.log_debug("Login Flow: Get levelup rewards")
+        # ===== LEVEL_UP_REWARDS
         self.perform_request(
             lambda req: req.level_up_rewards(level=self.player_stats['level']),
-            download_settings=True, get_inbox=True)
+            download_settings=True)
 
         # Check store -------------------------------------------------------
         # TODO: There is currently no way to call the GET_STORE_ITEMS platform request.
@@ -556,41 +557,46 @@ class POGOAccount(object):
 
     def _set_avatar(self, tutorial=False):
         player_avatar = avatar.new()
+        # ===== LIST_AVATAR_CUSTOMIZATIONS
         self.perform_request(lambda req: req.list_avatar_customizations(
             avatar_type=player_avatar['avatar'],
 #            slot=tuple(),
-            filters=2), buddy_walked=not tutorial, action=5)
+            filters=2), buddy_walked=not tutorial, action=5, get_inbox=False)
         time.sleep(random.uniform(7, 14))
 
+        # ===== SET_AVATAR
         self.perform_request(
             lambda req: req.set_avatar(player_avatar=player_avatar),
-            buddy_walked=not tutorial, action=2)
+            buddy_walked=not tutorial, action=2, get_inbox=False)
 
         if tutorial:
             time.sleep(random.uniform(.5, 4))
 
+            # ===== MARK_TUTORIAL_COMPLETE
             self.perform_request(
                 lambda req: req.mark_tutorial_complete(
-                    tutorials_completed=1), buddy_walked=False)
+                    tutorials_completed=1), buddy_walked=False, get_inbox=False)
 
             time.sleep(random.uniform(.5, 1))
 
         self.perform_request(
-            lambda req: req.get_player_profile(), action=1)
+            lambda req: req.get_player_profile(), action=1, get_inbox=False)
 
     def _complete_tutorial(self):
         tutorial_state = self.player_state['tutorial_state']
         if 0 not in tutorial_state:
             # legal screen
             self.log_debug("Tutorial #0: Legal screen")
+            # ===== MARK_TUTORIAL_COMPLETE
             self.perform_request(lambda req: req.mark_tutorial_complete(
-                tutorials_completed=0), buddy_walked=False)
+                tutorials_completed=0), buddy_walked=False, get_inbox=False)
             time.sleep(random.uniform(.35, .525))
 
+            # ===== GET_PLAYER
             self.perform_request(
                 lambda req: req.get_player(
                     player_locale=self.cfg['player_locale']),
-                buddy_walked=False)
+                buddy_walked=False, get_inbox=False)
             time.sleep(1)
 
         if 1 not in tutorial_state:
@@ -603,19 +609,22 @@ class POGOAccount(object):
             # encounter tutorial
             self.log_debug("Tutorial #3: Catch starter Pokemon")
             time.sleep(random.uniform(.7, .9))
+            # ===== GET_DOWNLOAD_URLS
             self.perform_request(lambda req: req.get_download_urls(asset_id=
                 ['1a3c2816-65fa-4b97-90eb-0b301c064b7a/1487275569649000',
                 'aa8f7687-a022-4773-b900-3a8c170e9aea/1487275581132582',
-                 'e89109b0-9a54-40fe-8431-12f7826c8194/1487275593635524']))
+                 'e89109b0-9a54-40fe-8431-12f7826c8194/1487275593635524']), get_inbox=False)
 
             time.sleep(random.uniform(7, 10.3))
             starter = random.choice((1, 4, 7))
+            # ===== ENCOUNTER_TUTORIAL_COMPLETE
             self.perform_request(lambda req: req.encounter_tutorial_complete(
-                pokemon_id=starter), action=1)
+                pokemon_id=starter), action=1, get_inbox=False)
 
             time.sleep(random.uniform(.4, .5))
+            # ===== GET_PLAYER
             responses = self.perform_request(
-                lambda req: req.get_player(player_locale=self.cfg['player_locale']))
+                lambda req: req.get_player(player_locale=self.cfg['player_locale']), get_inbox=False)
 
             try:
                 inventory = responses[
@@ -632,42 +641,48 @@ class POGOAccount(object):
             # name selection
             self.log_debug("Tutorial #4: Set trainer name")
             time.sleep(random.uniform(12, 18))
+            # ===== CLAIM_CODENAME
             self.perform_request(
                 lambda req: req.claim_codename(codename=self.username),
-                action=2)
+                action=2, get_inbox=False)
 
             time.sleep(.7)
+            # ===== GET_PLAYER
             self.perform_request(
-                lambda req: req.get_player(player_locale=self.cfg['player_locale']))
+                lambda req: req.get_player(player_locale=self.cfg['player_locale']), get_inbox=False)
             time.sleep(.13)
 
+            # ===== MARK_TUTORIAL_COMPLETE
             self.perform_request(lambda req: req.mark_tutorial_complete(
-                tutorials_completed=4), buddy_walked=False)
+                tutorials_completed=4), buddy_walked=False, get_inbox=False)
 
         if 7 not in tutorial_state:
             # first time experience
             self.log_debug("Tutorial #7: First time experience")
             time.sleep(random.uniform(3.9, 4.5))
+            # ===== MARK_TUTORIAL_COMPLETE
             self.perform_request(lambda req: req.mark_tutorial_complete(
-                tutorials_completed=7))
+                tutorials_completed=7), get_inbox=False)
 
         # set starter as buddy
         if starter_id:
             self.log_debug("Setting buddy Pokemon")
             time.sleep(random.uniform(4, 5))
+            # ===== SET_BUDDY_POKEMON
             self.perform_request(
                 lambda req: req.set_buddy_pokemon(pokemon_id=starter_id),
-                action=2)
+                action=2, get_inbox=False)
             time.sleep(random.uniform(.8, 1.2))
 
         time.sleep(.2)
         return True
 
     def _download_remote_config_version(self):
+        # ===== DOWNLOAD_REMOTE_CONFIG_VERSION
         responses = self.perform_request(
             lambda req: req.download_remote_config_version(platform=1,
                                                            app_version=APP_VERSION),
-            download_settings=True, buddy_walked=False)
+            download_settings=True, buddy_walked=False, get_inbox=False)
         if 'DOWNLOAD_REMOTE_CONFIG_VERSION' not in responses:
             raise Exception("Call to download_remote_config_version did not"
                             " return proper response.")
@@ -681,12 +696,13 @@ class POGOAccount(object):
         page_offset = 0
         page_timestamp = 0
         while result == 2:
+            # ===== GET_ASSET_DIGEST
             responses = self.perform_request(lambda req: req.get_asset_digest(
                 platform=1,
                 app_version=APP_VERSION,
                 paginate=True,
                 page_offset=page_offset,
-                page_timestamp=page_timestamp), buddy_walked=False, download_settings=True)
+                page_timestamp=page_timestamp), download_settings=True, buddy_walked=False, get_inbox=False)
             if i > 2:
                 time.sleep(1.45)
                 i = 0
@@ -708,10 +724,11 @@ class POGOAccount(object):
         page_offset = 0
         page_timestamp = 0
         while result == 2:
+            # ===== DOWNLOAD_ITEM_TEMPLATES
             responses = self.perform_request(lambda req: req.download_item_templates(
                 paginate=True,
                 page_offset=page_offset,
-                page_timestamp=page_timestamp), buddy_walked=False, download_settings=True)
+                page_timestamp=page_timestamp), download_settings=True, buddy_walked=False, get_inbox=False)
             if i > 2:
                 time.sleep(1.5)
                 i = 0

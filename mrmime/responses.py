@@ -37,3 +37,20 @@ def parse_player_stats(resp_get_inventory):
         if 'player_stats' in item_data:
             return item_data['player_stats']
     return {}
+
+def parse_raid_info(resp_gmo):
+    """
+        "forts":[
+          {
+            "raid_info":{
+              "raid_battle_ms":1498382264549,   2017-06-25T09:17:44 UTC
+              "raid_end_ms":1498385864549,      2017-06-25T10:17:44 UTC
+              "raid_seed":-648207574075539111,
+              "raid_spawn_ms":1498375064549,    2017-06-25T07:17:44 UTC
+              "raid_level":3
+            }
+          }
+        ]
+    :param resp_gmo:
+    :return:
+    """
