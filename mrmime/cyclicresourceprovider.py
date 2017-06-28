@@ -15,7 +15,7 @@ class CyclicResourceProvider(object):
                 self.add_resource(resource)
 
     def is_empty(self):
-        return len(self.resources) > 0
+        return len(self.resources) == 0
 
     def add_resource(self, resource):
         self.resources.append(resource)

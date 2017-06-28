@@ -36,7 +36,6 @@ class POGOAccount(object):
             self._hash_key_provider.add_resource(hash_key)
         else:
             self._hash_key_provider = CyclicResourceProvider()
-            self.log_debug("Initialized without hash_key.")
 
         # Initialize proxies
         self._proxy_url = None
@@ -46,7 +45,7 @@ class POGOAccount(object):
             self._proxy_provider = CyclicResourceProvider()
             self._proxy_provider.add_resource(proxy_url)
         else:
-            self._proxy_provider = None
+            self._proxy_provider = CyclicResourceProvider()
 
         self.cfg = _mr_mime_cfg.copy()
 
