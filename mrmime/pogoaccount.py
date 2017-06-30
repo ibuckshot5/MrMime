@@ -32,9 +32,9 @@ class POGOAccount(object):
         if hash_key_provider and not hash_key_provider.is_empty():
             self._hash_key_provider = hash_key_provider
         elif hash_key:
-            self._hash_key_provider = CyclicResourceProvider()
-            self._hash_key_provider.add_resource(hash_key)
+            self._hash_key_provider = CyclicResourceProvider(hash_key)
         else:
+            # Must be filled later with hash keys
             self._hash_key_provider = CyclicResourceProvider()
 
         # Initialize proxies
@@ -42,10 +42,9 @@ class POGOAccount(object):
         if proxy_provider and not proxy_provider.is_empty():
             self._proxy_provider = proxy_provider
         elif proxy_url:
-            self._proxy_provider = CyclicResourceProvider()
-            self._proxy_provider.add_resource(proxy_url)
+            self._proxy_provider = CyclicResourceProvider(proxy_url)
         else:
-            self._proxy_provider = CyclicResourceProvider()
+            self._proxy_provider = None
 
         self.cfg = _mr_mime_cfg.copy()
 
@@ -759,7 +758,10 @@ class POGOAccount(object):
             self._hash_key = value
         elif key == 'proxy_url':
             # Workaround to directly set one proxy.
-            self._proxy_provider.set_single_resource(value)
+            if self._proxy_provider is None:
+                self._proxy_provider = CyclicResourceProvider(value)
+            else:
+                self._proxy_provider.set_single_resource(value)
             self._proxy_url = value
         else:
             # Default: just set the property the normal way
