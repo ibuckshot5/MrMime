@@ -6,7 +6,7 @@ from threading import Lock
 
 from pgoapi import PGoApi
 from pgoapi.exceptions import AuthException, PgoapiError, \
-    BannedAccountException, HashingQuotaExceededException
+    BannedAccountException, HashingQuotaExceededException, HashingOfflineException, HashingTimeoutException
 from pgoapi.protos.pogoprotos.inventory.item.item_id_pb2 import *
 from pgoapi.utilities import get_cell_ids, f2i
 
@@ -33,9 +33,9 @@ class POGOAccount(object):
             self._hash_key_provider = hash_key_provider
         elif hash_key:
             self._hash_key_provider = CyclicResourceProvider(hash_key)
+            self._hash_key = hash_key
         else:
-            # Must be filled later with hash keys
-            self._hash_key_provider = CyclicResourceProvider()
+            self._hash_key_provider = None
 
         # Initialize proxies
         self._proxy_url = None
@@ -43,6 +43,7 @@ class POGOAccount(object):
             self._proxy_provider = proxy_provider
         elif proxy_url:
             self._proxy_provider = CyclicResourceProvider(proxy_url)
+            self._proxy_url = proxy_url
         else:
             self._proxy_provider = None
 
@@ -87,6 +88,30 @@ class POGOAccount(object):
 
         # Timestamp when previous user action is completed
         self._last_action = 0
+
+    @property
+    def hash_key(self):
+        return self._hash_key
+
+    @hash_key.setter
+    def hash_key(self, new_key):
+        if self._hash_key_provider is None:
+            self._hash_key_provider = CyclicResourceProvider(new_key)
+        else:
+            self._hash_key_provider.set_single_resource(new_key)
+        self._hash_key = new_key
+
+    @property
+    def proxy_url(self):
+        return self._proxy_url
+
+    @proxy_url.setter
+    def proxy_url(self, new_proxy_url):
+        if self._proxy_provider is None:
+            self._proxy_provider = CyclicResourceProvider(new_proxy_url)
+        else:
+            self._proxy_provider.set_single_resource(new_proxy_url)
+        self._proxy_url = new_proxy_url
 
     def set_position(self, lat, lng, alt):
         """Sets the location and altitude of the account"""
@@ -396,9 +421,15 @@ class POGOAccount(object):
                 response = request.call()
                 self._last_request = time.time()
                 success = True
-            except HashingQuotaExceededException:
-                if self.cfg['retry_on_hash_quota_exceeded'] == True:
-                    self.log_warning("Hashing quota exceeded. Retrying in 5s.")
+            except HashingQuotaExceededException as e:
+                if self.cfg['retry_on_hash_quota_exceeded'] or self.cfg['retry_on_hashing_error']:
+                    self.log_warning("{}: Retrying in 5s.".format(repr(e)))
+                    time.sleep(5)
+                else:
+                    raise
+            except (HashingOfflineException, HashingTimeoutException) as e:
+                if self.cfg['retry_on_hashing_error']:
+                    self.log_warning("{}: Retrying in 5s.".format(repr(e)))
                     time.sleep(5)
                 else:
                     raise
@@ -741,31 +772,6 @@ class POGOAccount(object):
             page_offset = response.get('page_offset')
             page_timestamp = response['timestamp_ms']
         self._item_templates_time = template_time
-
-    def __getattr__(self, item):
-        # Backwards compatibility
-        if item == 'hash_key':
-            return self._hash_key
-        elif item == 'proxy_url':
-            return self._proxy_url
-        else:
-            return self[item]
-
-    def __setattr__(self, key, value):
-        if key == 'hash_key':
-            # Workaround to directly set one hash key.
-            self._hash_key_provider.set_single_resource(value)
-            self._hash_key = value
-        elif key == 'proxy_url':
-            # Workaround to directly set one proxy.
-            if self._proxy_provider is None:
-                self._proxy_provider = CyclicResourceProvider(value)
-            else:
-                self._proxy_provider.set_single_resource(value)
-            self._proxy_url = value
-        else:
-            # Default: just set the property the normal way
-            super(POGOAccount, self).__setattr__(key, value)
 
     def log_info(self, msg):
         self.last_msg = msg
