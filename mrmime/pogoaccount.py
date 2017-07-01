@@ -15,6 +15,8 @@ from mrmime.cyclicresourceprovider import CyclicResourceProvider
 from mrmime.responses import parse_inventory_delta, parse_player_stats
 from mrmime.utils import jitter_location
 
+from geopy import Point
+
 log = logging.getLogger(__name__)
 login_lock = Lock()
 
@@ -88,6 +90,8 @@ class POGOAccount(object):
 
         # Timestamp when previous user action is completed
         self._last_action = 0
+
+        self._map_cells = []
 
     @property
     def hash_key(self):
@@ -270,7 +274,7 @@ class POGOAccount(object):
             jitter=False # we already jittered
         )
         self._last_gmo = self._last_request
-
+        self._map_cells = responses['GET_MAP_OBJECTS']['map_cells']
         return responses
 
     def req_encounter(self, encounter_id, spawn_point_id, latitude, longitude):
@@ -335,6 +339,30 @@ class POGOAccount(object):
             else:
                 self.log_warning("Failed verifyChallenge")
                 return False
+
+    def get_forts(self):
+        forts = []
+        for cell in self._map_cells:
+            for fort in enumerate(cell['forts']):
+                forts.append(fort)
+
+        return forts
+
+    def get_pokemon(self):
+        pokemons = []
+        for cell in self._map_cells:
+            for pokemon in enumerate(cell['catchable_pokemons']):
+                pokemons.append(pokemon)
+
+        return pokemons
+
+    def get_spawn_points(self):
+        spawns = []
+        for cell in self._map_cells:
+            for spawnpoint in enumerate(cell['spawn_points']):
+                spawns.append(spawnpoint)
+
+        return spawns
 
     # =======================================================================
 
